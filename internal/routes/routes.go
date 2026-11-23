@@ -6,10 +6,10 @@ import (
 	"generator/internal/handler"
 )
 
-func SetupRoutes() *http.ServeMux {
+func SetupRoutes(videoHandler *handler.VideoHandler, jobHandler *handler.ProcessingJobHandler) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/health", handler.HealthHandler)
-
+	mux.HandleFunc("POST /api/videos/upload", videoHandler.UploadVideo)
+	mux.HandleFunc("GET /api/jobs/{id}", jobHandler.GetJobByID)
 	return mux
 }

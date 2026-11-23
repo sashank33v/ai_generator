@@ -1,0 +1,11 @@
+
+CREATE TABLE videos (
+    id BIGSERIAL PRIMARY KEY,
+    original_name VARCHAR(255) NOT NULL,
+    file_name VARCHAR(255) NOT NULL UNIQUE,
+    file_path TEXT NOT NULL,
+    file_size BIGINT NOT NULL,
+    mime_type VARCHAR(100) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
