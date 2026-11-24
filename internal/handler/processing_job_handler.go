@@ -1,22 +1,27 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"strconv"
 
-	"generator/internal/service"
+	"generator/internal/model"
 
 	"github.com/jackc/pgx/v5"
 )
 
-type ProcessingJobHandler struct {
-	jobService *service.ProcessingJobService
+type ProcessingJobService interface {
+	GetJobByID(ctx context.Context, id int64) (*model.ProcessingJob, error)
 }
 
-func NewProcessingJobHandler(jobService *service.ProcessingJobService) *ProcessingJobHandler {
+type ProcessingJobHandler struct {
+	jobService ProcessingJobService
+}
+
+func NewProcessingJobHandler(jobService ProcessingJobService) *ProcessingJobHandler {
 	return &ProcessingJobHandler{
 		jobService: jobService,
 	}

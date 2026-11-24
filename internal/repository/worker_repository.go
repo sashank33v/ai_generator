@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"generator/internal/model"
@@ -131,4 +132,117 @@ func (r *WorkerRepository) UpdateJobStatus(
 	}
 
 	return nil
+}
+func (r *WorkerRepository) RecoverInterruptedJobs(
+	ctx context.Context,
+) error {
+
+	query := `
+		WITH recovered AS (
+			UPDATE processing_jobs
+			SET status = 'PENDING',
+			    error_message = NULL,
+			    updated_at = NOW()
+			WHERE status IN (
+				'PROCESSING',
+				'TRANSCRIBING',
+				'ANALYZING',
+				'GENERATING'
+			)
+			RETURNING video_id
+		)
+		UPDATE videos
+		SET status = 'PENDING'
+		WHERE id IN (
+			SELECT video_id FROM recovered
+		)
+	`
+
+	_, err := r.db.Exec(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to recover jobs: %w", err)
+	}
+
+	return nil
+}
+
+var ErrJobNotRetryable = errors.New("only failed jobs can be retried")
+
+func (r *WorkerRepository) RetryFailedJob(ctx context.Context, jobID int64) error {
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var videoID int64
+	var status string
+
+	err = tx.QueryRow(ctx, `
+		SELECT video_id, status
+		FROM processing_jobs
+		WHERE id = $1
+		FOR UPDATE
+	`, jobID).Scan(&videoID, &status)
+
+	if err != nil {
+		return err
+	}
+
+	if status != "FAILED" {
+		return ErrJobNotRetryable
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE processing_jobs
+		SET status = 'PENDING',
+		    error_message = NULL,
+		    updated_at = NOW()
+		WHERE id = $1
+	`, jobID)
+
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE videos
+		SET status = 'PENDING'
+		WHERE id = $1
+	`, videoID)
+
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+func (r *WorkerRepository) ResetJobArtifacts(ctx context.Context, videoID int64) error {
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `
+		DELETE FROM transcriptions
+		WHERE video_id = $1
+	`, videoID)
+
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
+		DELETE FROM generated_clips
+		WHERE video_id = $1
+	`, videoID)
+
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }

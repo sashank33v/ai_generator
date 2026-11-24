@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"generator/internal/ai"
 	"generator/internal/config"
 	"generator/internal/handler"
 	"generator/internal/processor"
@@ -32,29 +33,53 @@ func main() {
 	}
 	defer db.Close()
 
+	llamaClient := ai.NewLlamaClient()
+
 	videoRepo := repository.NewVideoRepository(db)
 	jobRepo := repository.NewProcessingJobRepository(db)
 	workerRepo := repository.NewWorkerRepository(db)
+	generatedClipRepo := repository.NewGeneratedClipRepository(db)
 	audioProcessor := processor.NewAudioProcessor()
+	transcriptionProcessor := processor.NewTranscriptionProcessor()
+	videoProcessor := processor.NewVideoProcessor()
+	transcriptionRepo := repository.NewTranscriptionRepository(db)
 	jobService := service.NewProcessingJobService(jobRepo)
+	clipService := service.NewClipCandidateService(transcriptionRepo)
 	videoService := service.NewVideoService(videoRepo, jobService, cfg.StorageDir)
-	workerService := service.NewWorkerService(workerRepo, videoRepo, audioProcessor)
+	scoringService := service.NewClipScoringService(llamaClient)
+	rankingService := service.NewClipRankingService(clipService, scoringService)
+	metadataService := service.NewClipMetadataService(llamaClient)
+	generationService := service.NewClipGenerationService(rankingService, videoRepo, videoProcessor, metadataService, generatedClipRepo)
+	workerService := service.NewWorkerService(workerRepo, videoRepo, audioProcessor, transcriptionProcessor, transcriptionRepo, generationService)
 	videoHandler := handler.NewVideoHandler(videoService)
 	jobHandler := handler.NewProcessingJobHandler(jobService)
-
-	router := routes.SetupRoutes(videoHandler, jobHandler)
+	rankingHandler := handler.NewClipRankingHandler(rankingService)
+	generationHandler := handler.NewClipGenerationHandler(generationService)
+	clipHandler := handler.NewClipCandidateHandler(clipService)
+	retryHandler := handler.NewRetryJobHandler(workerService)
+	router := routes.SetupRoutes(videoHandler, jobHandler, clipHandler, rankingHandler, generationHandler, retryHandler)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: router,
 	}
 
-	ctx, stop := signal.NotifyContext(
-		context.Background(),
-		os.Interrupt,
-		syscall.SIGTERM,
-	)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+
 	defer stop()
+	recoveryCtx, recoveryCancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+
+	err = workerService.RecoverInterruptedJobs(recoveryCtx)
+	recoveryCancel()
+
+	if err != nil {
+		log.Fatalf("Failed to recover interrupted jobs: %v", err)
+	}
+
+	log.Println("Interrupted job recovery completed")
 
 	backgroundWorker := worker.NewWorker(workerService)
 	go backgroundWorker.Start(ctx)
