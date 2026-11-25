@@ -6,7 +6,7 @@ import (
 	"generator/internal/handler"
 )
 
-func SetupRoutes(videoHandler *handler.VideoHandler, jobHandler *handler.ProcessingJobHandler, clipHandler *handler.ClipCandidateHandler, rankingHandler *handler.ClipRankingHandler, generationHandler *handler.ClipGenerationHandler, retryHandler *handler.RetryJobHandler) *http.ServeMux {
+func SetupRoutes(videoHandler *handler.VideoHandler, jobHandler *handler.ProcessingJobHandler, clipHandler *handler.ClipCandidateHandler, rankingHandler *handler.ClipRankingHandler, generationHandler *handler.ClipGenerationHandler, retryHandler *handler.RetryJobHandler, youtubeHandler *handler.YouTubeHandler) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/videos/upload", videoHandler.UploadVideo)
@@ -18,5 +18,6 @@ func SetupRoutes(videoHandler *handler.VideoHandler, jobHandler *handler.Process
 	mux.HandleFunc("GET /api/videos/{id}/download", generationHandler.DownloadClip)
 	mux.HandleFunc("GET /api/videos/{id}/clip", generationHandler.GetGeneratedClip)
 	mux.HandleFunc("POST /api/jobs/{id}/retry", retryHandler.RetryJob)
+	mux.HandleFunc("POST /api/videos/youtube", youtubeHandler.ProcessYouTubeURL)
 	return mux
 }

@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"time"
 
 	"generator/internal/model"
 	"generator/internal/processor"
@@ -38,13 +40,17 @@ func (s *ClipGenerationService) GenerateBestClip(ctx context.Context, videoID in
 		return "", empty, nil, fmt.Errorf("invalid video ID")
 	}
 
+	// Step 1: Retrieve original video.
 	video, err := s.videoRepo.GetByID(ctx, videoID)
 	if err != nil {
 		return "", empty, nil, fmt.Errorf("failed to get video: %w", err)
 	}
+
 	if video.Status != "ANALYZING" {
 		return "", empty, nil, fmt.Errorf("video is not in analyzing state")
 	}
+
+	// Step 2: Rank optimized clip candidates.
 	rankings, err := s.rankingService.RankCandidates(ctx, videoID)
 	if err != nil {
 		return "", empty, nil, fmt.Errorf("failed to rank clips: %w", err)
@@ -56,10 +62,15 @@ func (s *ClipGenerationService) GenerateBestClip(ctx context.Context, videoID in
 
 	bestClip := rankings[0]
 
+	// Step 3: Generate title and caption.
 	metadata, err := s.metadataService.GenerateMetadata(ctx, bestClip)
 	if err != nil {
-		return "", empty, nil, fmt.Errorf("metadata generation failed: %w", err)
+		return "", empty, nil, fmt.Errorf(
+			"failed to generate metadata: %w", err,
+		)
 	}
+
+	// Step 4: Update job status to GENERATING.
 	if onGenerating != nil {
 		if err := onGenerating(); err != nil {
 			return "", empty, nil, fmt.Errorf(
@@ -67,29 +78,37 @@ func (s *ClipGenerationService) GenerateBestClip(ctx context.Context, videoID in
 			)
 		}
 	}
-	landscapePath := fmt.Sprintf("storage/outputs/video_%d_best.mp4", videoID)
 
-	verticalPath := fmt.Sprintf("storage/outputs/video_%d_vertical.mp4", videoID)
+	// Step 5: Generate vertical clip using single-pass FFmpeg.
+	verticalPath := fmt.Sprintf(
+		"storage/outputs/video_%d_vertical.mp4",
+		videoID,
+	)
 
-	err = s.videoProcessor.GenerateClip(
+	log.Printf("Generating single-pass vertical Reel for video %d", videoID)
+
+	startedAt := time.Now()
+
+	err = s.videoProcessor.GenerateVerticalClip(
 		ctx,
 		video.FilePath,
-		landscapePath,
+		verticalPath,
 		bestClip.Candidate.StartTime,
 		bestClip.Candidate.Endtime,
 	)
+
 	if err != nil {
-		return "", empty, nil, fmt.Errorf("clip generation failed: %w", err)
+		return "", empty, nil, fmt.Errorf(
+			"failed to generate vertical clip: %w", err,
+		)
 	}
 
-	err = s.videoProcessor.ConvertToVertical(
-		ctx,
-		landscapePath,
-		verticalPath,
+	log.Printf(
+		"Vertical clip generated in %v",
+		time.Since(startedAt),
 	)
-	if err != nil {
-		return "", empty, nil, fmt.Errorf("vertical conversion failed: %w", err)
-	}
+
+	// Step 6: Prepare generated clip record.
 	generatedClip := &model.GeneratedClip{
 		VideoID:   videoID,
 		StartTime: bestClip.Candidate.StartTime,
@@ -100,6 +119,7 @@ func (s *ClipGenerationService) GenerateBestClip(ctx context.Context, videoID in
 		FilePath:  verticalPath,
 	}
 
+	// Step 7: Save generated clip details.
 	if err := s.generatedClipRepo.Save(ctx, generatedClip); err != nil {
 		return "", empty, nil, fmt.Errorf(
 			"failed to save generated clip: %w", err,

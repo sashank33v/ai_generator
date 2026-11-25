@@ -12,6 +12,7 @@ import (
 
 	"generator/internal/ai"
 	"generator/internal/config"
+	"generator/internal/downloader"
 	"generator/internal/handler"
 	"generator/internal/processor"
 	"generator/internal/repository"
@@ -39,10 +40,11 @@ func main() {
 	jobRepo := repository.NewProcessingJobRepository(db)
 	workerRepo := repository.NewWorkerRepository(db)
 	generatedClipRepo := repository.NewGeneratedClipRepository(db)
+	transcriptionRepo := repository.NewTranscriptionRepository(db)
 	audioProcessor := processor.NewAudioProcessor()
 	transcriptionProcessor := processor.NewTranscriptionProcessor()
 	videoProcessor := processor.NewVideoProcessor()
-	transcriptionRepo := repository.NewTranscriptionRepository(db)
+	youtubeDownloader := downloader.NewYouTubeDownloader("storage/uploads")
 	jobService := service.NewProcessingJobService(jobRepo)
 	clipService := service.NewClipCandidateService(transcriptionRepo)
 	videoService := service.NewVideoService(videoRepo, jobService, cfg.StorageDir)
@@ -51,13 +53,15 @@ func main() {
 	metadataService := service.NewClipMetadataService(llamaClient)
 	generationService := service.NewClipGenerationService(rankingService, videoRepo, videoProcessor, metadataService, generatedClipRepo)
 	workerService := service.NewWorkerService(workerRepo, videoRepo, audioProcessor, transcriptionProcessor, transcriptionRepo, generationService)
+	youtubeService := service.NewYoutubeService(videoRepo, youtubeDownloader)
 	videoHandler := handler.NewVideoHandler(videoService)
 	jobHandler := handler.NewProcessingJobHandler(jobService)
 	rankingHandler := handler.NewClipRankingHandler(rankingService)
 	generationHandler := handler.NewClipGenerationHandler(generationService)
 	clipHandler := handler.NewClipCandidateHandler(clipService)
 	retryHandler := handler.NewRetryJobHandler(workerService)
-	router := routes.SetupRoutes(videoHandler, jobHandler, clipHandler, rankingHandler, generationHandler, retryHandler)
+	youtubeHandler := handler.NewYouTubeHandler(youtubeService)
+	router := routes.SetupRoutes(videoHandler, jobHandler, clipHandler, rankingHandler, generationHandler, retryHandler, youtubeHandler)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

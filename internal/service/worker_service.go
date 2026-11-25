@@ -216,6 +216,7 @@ func (s *WorkerService) cleanupJobArtifacts(
 		fmt.Sprintf("storage/audio/%d.wav.transcription.json", videoID),
 		fmt.Sprintf("storage/outputs/video_%d_best.mp4", videoID),
 		fmt.Sprintf("storage/outputs/video_%d_vertical.mp4", videoID),
+		fmt.Sprintf("storage/outputs/video_%d_vertical.mp4.partial.mp4", videoID),
 	}
 
 	for _, path := range paths {
